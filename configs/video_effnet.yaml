@@ -1,0 +1,28 @@
+# Video module: EfficientNet-B4 on FaceForensics++ (c23) face crops.
+# Paths assume Google Drive mounted at /content/drive (see notebooks/colab_quickstart.ipynb).
+seed: 42
+output_dir: /content/drive/MyDrive/forensight/runs/video_effnet_b4
+
+data:
+  ffpp_root: /content/drive/MyDrive/forensight/datasets/FaceForensics++
+  ffpp_splits: /content/drive/MyDrive/forensight/datasets/FaceForensics++/splits
+  compression: c23
+  frames_dir: /content/forensight_frames/ffpp_c23   # local Colab disk: much faster than Drive
+  num_frames: 32              # frames sampled per video during preprocessing
+  frames_per_video_train: 16  # cap per video so long videos do not dominate
+  image_size: 380             # native EfficientNet-B4 resolution
+  face_scale: 1.3
+
+model:
+  backbone: efficientnet_b4
+  pretrained: true
+
+train:
+  epochs: 8
+  batch_size: 24       # fits a 16 GB T4 with mixed precision; lower if out of memory
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  num_workers: 2
+  monitor: auc         # video-level validation AUC
+  monitor_mode: max
+  log_every: 100
