@@ -72,9 +72,20 @@ def fit(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader, cfg:
     )
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
     monitor, mode = t.get("monitor", "auc"), t.get("monitor_mode", "max")
-    best, history = None, []
+    best, history, start_epoch = None, [], 1
 
-    for epoch in range(1, t["epochs"] + 1):
+    # Resume: a run interrupted by a Colab disconnect continues from its last finished epoch.
+    ckpt_path = out_dir / "checkpoint.pt"
+    if t.get("resume", True) and ckpt_path.exists():
+        ck = torch.load(ckpt_path, map_location=device)
+        model.load_state_dict(ck["model"])
+        optim.load_state_dict(ck["optim"])
+        sched.load_state_dict(ck["sched"])
+        scaler.load_state_dict(ck["scaler"])
+        best, history, start_epoch = ck["best"], ck["history"], ck["epoch"] + 1
+        print(f"Resuming from epoch {start_epoch} (best val {monitor} so far: {best})")
+
+    for epoch in range(start_epoch, t["epochs"] + 1):
         model.train()
         start, running = time.time(), 0.0
         for step, (x, y, _) in enumerate(train_loader, 1):
@@ -103,5 +114,9 @@ def fit(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader, cfg:
             print(f"  new best val {monitor} = {score:.4f} -> saved best.pt")
         torch.save(model.state_dict(), out_dir / "last.pt")
         (out_dir / "history.json").write_text(json.dumps(history, indent=2))
+        tmp = out_dir / "checkpoint.pt.tmp"   # written then renamed, so a disconnect never leaves a broken file
+        torch.save({"model": model.state_dict(), "optim": optim.state_dict(), "sched": sched.state_dict(),
+                    "scaler": scaler.state_dict(), "epoch": epoch, "best": best, "history": history}, tmp)
+        tmp.replace(ckpt_path)
 
     return {"best_" + monitor: best, "history": history}
