@@ -74,10 +74,15 @@ class ASVspoofDataset(Dataset):
     """Raw-waveform ASVspoof dataset (works for 2019 LA and 2021 DF)."""
 
     def __init__(self, protocol: str | Path, audio_dir: str | Path, train: bool = False,
-                 num_samples: int = NUM_SAMPLES, ext: str = ".flac", subset: str | None = None):
+                 num_samples: int = NUM_SAMPLES, ext: str = ".flac", subset: str | None = None,
+                 only_existing: bool = False):
         utts = asvspoof.read_protocol(protocol)
         if subset:
             utts = [u for u in utts if u.subset == subset]
+        if only_existing:
+            total = len(utts)
+            utts = asvspoof.filter_existing(utts, audio_dir, ext)
+            print(f"{protocol}: using {len(utts)} of {total} utterances found on disk")
         self.utts = utts
         self.audio_dir = Path(audio_dir)
         self.train = train

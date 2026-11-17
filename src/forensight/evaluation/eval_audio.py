@@ -48,7 +48,8 @@ def main(argv=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for name, e in cfg["eval_sets"].items():
-        ds = ASVspoofDataset(e["protocol"], e["audio"], subset=e.get("subset"))
+        ds = ASVspoofDataset(e["protocol"], e["audio"], subset=e.get("subset"),
+                             only_existing=e.get("only_existing", False))
         loader = DataLoader(ds, batch_size=cfg.get("batch_size", 32), num_workers=2)
         keys, probs, labels = predict(model, loader, device)
         res = metrics.full_report(labels, probs)
