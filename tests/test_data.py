@@ -121,3 +121,23 @@ def test_filter_existing_keeps_only_downloaded_clips(tmp_path):
     utts = [asvspoof.parse_line(f"LA_0001 DF_E_{i} nocodec asvspoof A01 spoof notrim eval x - - - -") for i in (1, 2)]
     kept = asvspoof.filter_existing(utts, tmp_path)
     assert [u.utt_id for u in kept] == ["DF_E_1"]
+
+
+def test_chunked_scoring_resume_and_merge(tmp_path):
+    from forensight.evaluation import chunked
+
+    keys = [f"DF_E_{i}" for i in range(10)]
+    ranges = chunked.chunk_ranges(len(keys), 4)
+    assert ranges == [(0, 4), (4, 8), (8, 10)]
+    run = tmp_path / chunked.key_hash(keys)
+    for i, (s, t) in enumerate(ranges):
+        chunked.save_chunk(run, i, keys[s:t], np.linspace(0, 1, t - s), [i % 2] * (t - s))
+    k, p, y = chunked.merge_chunks(run, len(ranges), keys)
+    assert k == keys and len(p) == 10 and y.dtype.kind == "i"
+    assert not list(run.glob(".tmp_*"))  # no half-written files left behind
+    assert chunked.key_hash(keys) != chunked.key_hash(keys[:-1])
+    with pytest.raises(ValueError):
+        chunked.merge_chunks(run, len(ranges), keys[::-1])
+    chunked.chunk_path(run, 1).unlink()
+    with pytest.raises(FileNotFoundError):
+        chunked.merge_chunks(run, len(ranges), keys)
