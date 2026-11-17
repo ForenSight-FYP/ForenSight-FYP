@@ -60,3 +60,15 @@ def read_protocol(path: str | Path) -> list[Utterance]:
 
 def audio_path(audio_dir: str | Path, utt_id: str, ext: str = ".flac") -> Path:
     return Path(audio_dir) / f"{utt_id}{ext}"
+
+
+def filter_existing(utts: list[Utterance], audio_dir: str | Path, ext: str = ".flac") -> list[Utterance]:
+    """Keep only utterances whose audio file is on disk.
+
+    The ASVspoof 2021 DF eval audio ships as four ~8.6 GB archives. When only some
+    parts are downloaded, this restricts evaluation to the clips actually present.
+    Report such results as partial (e.g. "DF21 eval, part00 only").
+    """
+    audio_dir = Path(audio_dir)
+    present = {p.stem for p in audio_dir.glob(f"*{ext}")}
+    return [u for u in utts if u.utt_id in present]

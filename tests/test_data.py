@@ -114,3 +114,10 @@ def test_aggregate_by_video():
 def test_config_overrides():
     cfg = apply_overrides({"train": {"epochs": 8}}, ["train.epochs=1", "model.backbone=efficientnet_b0"])
     assert cfg == {"train": {"epochs": 1}, "model": {"backbone": "efficientnet_b0"}}
+
+
+def test_filter_existing_keeps_only_downloaded_clips(tmp_path):
+    (tmp_path / "DF_E_1.flac").write_bytes(b"")
+    utts = [asvspoof.parse_line(f"LA_0001 DF_E_{i} nocodec asvspoof A01 spoof notrim eval x - - - -") for i in (1, 2)]
+    kept = asvspoof.filter_existing(utts, tmp_path)
+    assert [u.utt_id for u in kept] == ["DF_E_1"]

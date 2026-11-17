@@ -16,6 +16,7 @@ eval_sets:
     protocol: /content/asvspoof/DF21/keys/DF/CM/trial_metadata.txt
     audio: /content/asvspoof/DF21/ASVspoof2021_DF_eval/flac
     subset: eval   # official ranking subset; use "progress" for the smaller one
+    only_existing: true   # evaluate on the DF parts actually downloaded
 
 train:
   epochs: 20

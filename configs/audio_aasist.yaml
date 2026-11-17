@@ -16,3 +16,4 @@ eval_sets:
     protocol: /content/asvspoof/DF21/keys/DF/CM/trial_metadata.txt
     audio: /content/asvspoof/DF21/ASVspoof2021_DF_eval/flac
     subset: eval
+    only_existing: true   # evaluate on the DF parts actually downloaded
