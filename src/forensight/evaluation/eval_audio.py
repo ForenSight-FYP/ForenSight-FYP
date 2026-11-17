@@ -47,16 +47,42 @@ def main(argv=None):
     out_dir = Path(cfg["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    chunk_size = int(cfg.get("chunk_size", 0) or 0)
     for name, e in cfg["eval_sets"].items():
         ds = ASVspoofDataset(e["protocol"], e["audio"], subset=e.get("subset"),
                              only_existing=e.get("only_existing", False))
-        loader = DataLoader(ds, batch_size=cfg.get("batch_size", 32), num_workers=2)
-        keys, probs, labels = predict(model, loader, device)
+        loader_kw = dict(batch_size=cfg.get("batch_size", 32), num_workers=2)
+        if chunk_size:
+            keys, probs, labels = _score_in_chunks(model, ds, name, out_dir, chunk_size, loader_kw, device)
+        else:
+            keys, probs, labels = predict(model, DataLoader(ds, **loader_kw), device)
         res = metrics.full_report(labels, probs)
         (out_dir / f"{name}_metrics.json").write_text(json.dumps(res, indent=2))
         np.savez_compressed(out_dir / f"{name}_scores.npz", keys=np.array(keys), probs=probs, labels=labels)
         print(f"{name}: n={len(ds)}  EER {res['eer'] * 100:.2f}%  AUC {res['auc']:.4f}")
 
+
+def _score_in_chunks(model, ds, name, out_dir, chunk_size, loader_kw, device):
+    """Score ds chunk by chunk, saving each chunk; already-saved chunks are skipped."""
+    import time
+
+    from torch.utils.data import Subset
+
+    from forensight.evaluation import chunked
+
+    all_keys = [u.utt_id for u in ds.utts]
+    run_dir = out_dir / f"{name}_chunks_{chunked.key_hash(all_keys)}"
+    ranges = chunked.chunk_ranges(len(ds), chunk_size)
+    done = sum(chunked.chunk_path(run_dir, i).exists() for i in range(len(ranges)))
+    print(f"{name}: {len(ds)} clips in {len(ranges)} chunks of {chunk_size}; {done} already saved in {run_dir}")
+    for i, (s, t) in enumerate(ranges):
+        if chunked.chunk_path(run_dir, i).exists():
+            continue
+        start = time.time()
+        keys, probs, labels = predict(model, DataLoader(Subset(ds, range(s, t)), **loader_kw), device)
+        chunked.save_chunk(run_dir, i, keys, probs, labels)
+        print(f"  chunk {i + 1}/{len(ranges)} saved ({t - s} clips, {time.time() - start:.0f}s)", flush=True)
+    return chunked.merge_chunks(run_dir, len(ranges), all_keys)
 
 if __name__ == "__main__":
     main()
