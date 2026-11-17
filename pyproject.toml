@@ -43,3 +43,6 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
 ignore = ["E731", "B905"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["forensight"]
