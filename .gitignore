@@ -7,12 +7,12 @@ __pycache__/
 .ruff_cache/
 
 # Data, models and outputs never go in git (datasets are licence-restricted)
-data/
-datasets/
-checkpoints/
-outputs/
-runs/
-third_party/
+/data/
+/datasets/
+/checkpoints/
+/outputs/
+/runs/
+/third_party/
 *.pth
 *.pt
 *.ckpt
