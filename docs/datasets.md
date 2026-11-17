@@ -8,8 +8,8 @@ licence-restricted; `.gitignore` already blocks common media formats).
 |---|---|---|---|
 | FaceForensics++ (c23) | Video train/val/test | Fill in the Google Form linked from the FF++ GitHub README (github.com/ondyari/FaceForensics). You receive a download script. Download only `c23` videos. | Not requested |
 | Celeb-DF v2 | Video cross-dataset test | Request form linked from github.com/yuezunli/celeb-deepfakeforensics | Not requested |
-| ASVspoof 2019 LA | Audio train/dev/eval | Open download from the University of Edinburgh DataShare (search "ASVspoof 2019 database") | Not downloaded |
-| ASVspoof 2021 DF | Audio cross-test | Open download (eval audio on Zenodo) + keys from asvspoof.org | Not downloaded |
+| ASVspoof 2019 LA | Audio train/dev/eval | Automated in notebook section 2a: LA.zip from Edinburgh DataShare (handle 10283/3336), cached in Drive | Automated |
+| ASVspoof 2021 DF | Audio cross-test | Automated in notebook section 2d: keys from asvspoof.org (DF-keys-full.tar.gz) + eval audio from Zenodo record 4835108 (4 parts, ~8.6 GB each, 34.5 GB total). By default only part00 is used; results are reported as a part00 subset. | Automated (part00) |
 | FakeAVCeleb | Audio-visual + fusion | Request form linked from github.com/DASH-Lab/FakeAVCeleb | Not requested |
 | LAV-DF | Audio-visual backup | Accept terms on Hugging Face (ControlNet/LAV-DF) | Not requested |
 

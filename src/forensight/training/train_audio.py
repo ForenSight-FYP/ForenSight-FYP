@@ -40,8 +40,9 @@ def main(argv=None):
 
     device = pick_device()
     model.load_state_dict(torch.load(out_dir / "best.pt", map_location=device))
-    for name, e in cfg.get("eval_sets", {}).items():
-        ds = ASVspoofDataset(e["protocol"], e["audio"], subset=e.get("subset"))
+    for name, e in (cfg.get("eval_sets") or {}).items():
+        ds = ASVspoofDataset(e["protocol"], e["audio"], subset=e.get("subset"),
+                             only_existing=e.get("only_existing", False))
         res = evaluate(model.to(device), loader(ds, False), device, group_by_key=False)
         (out_dir / f"{name}_metrics.json").write_text(json.dumps(res, indent=2))
         print(f"{name}: EER {res['eer'] * 100:.2f}%  AUC {res['auc']:.4f}")
