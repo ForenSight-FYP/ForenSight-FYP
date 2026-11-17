@@ -1,0 +1,28 @@
+# Audio baseline: log-mel CNN. Train on ASVspoof 2019 LA, test on 2019 LA eval and 2021 DF.
+seed: 42
+output_dir: /content/drive/MyDrive/forensight/runs/audio_melcnn
+
+data:
+  train_protocol: /content/asvspoof/LA/ASVspoof2019_LA_cm_protocols/ASVspoof2019.LA.cm.train.trn.txt
+  train_audio: /content/asvspoof/LA/ASVspoof2019_LA_train/flac
+  dev_protocol: /content/asvspoof/LA/ASVspoof2019_LA_cm_protocols/ASVspoof2019.LA.cm.dev.trl.txt
+  dev_audio: /content/asvspoof/LA/ASVspoof2019_LA_dev/flac
+
+eval_sets:
+  la19_eval:
+    protocol: /content/asvspoof/LA/ASVspoof2019_LA_cm_protocols/ASVspoof2019.LA.cm.eval.trl.txt
+    audio: /content/asvspoof/LA/ASVspoof2019_LA_eval/flac
+  df21_eval:
+    protocol: /content/asvspoof/DF21/keys/DF/CM/trial_metadata.txt
+    audio: /content/asvspoof/DF21/ASVspoof2021_DF_eval/flac
+    subset: eval   # official ranking subset; use "progress" for the smaller one
+
+train:
+  epochs: 20
+  batch_size: 64
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  num_workers: 2
+  monitor: eer        # lower is better
+  monitor_mode: min
+  log_every: 100

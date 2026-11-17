@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Data, models and outputs never go in git (datasets are licence-restricted)
+data/
+datasets/
+checkpoints/
+outputs/
+runs/
+third_party/
+*.pth
+*.pt
+*.ckpt
+*.mp4
+*.avi
+*.wav
+*.flac
+*.npz
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+.env

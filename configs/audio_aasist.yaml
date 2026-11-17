@@ -1,0 +1,18 @@
+# Evaluate the official pretrained AASIST (trained on ASVspoof 2019 LA) on our test sets.
+# Run scripts/setup_aasist.sh first.
+output_dir: /content/drive/MyDrive/forensight/runs/audio_aasist_pretrained
+batch_size: 32
+
+model:
+  name: aasist
+  repo_dir: third_party/aasist
+  variant: AASIST        # or AASIST-L (smaller, slightly weaker)
+
+eval_sets:
+  la19_eval:
+    protocol: /content/asvspoof/LA/ASVspoof2019_LA_cm_protocols/ASVspoof2019.LA.cm.eval.trl.txt
+    audio: /content/asvspoof/LA/ASVspoof2019_LA_eval/flac
+  df21_eval:
+    protocol: /content/asvspoof/DF21/keys/DF/CM/trial_metadata.txt
+    audio: /content/asvspoof/DF21/ASVspoof2021_DF_eval/flac
+    subset: eval
