@@ -54,36 +54,100 @@ def expand_box(x: int, y: int, w: int, h: int, scale: float, img_w: int, img_h: 
     return x0, y0, x1, y1
 
 
+_MODEL_URLS = {
+    "mediapipe": "https://storage.googleapis.com/mediapipe-models/face_detector/"
+    "blaze_face_short_range/float16/latest/blaze_face_short_range.tflite",
+    "yunet": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/"
+    "face_detection_yunet_2023mar.onnx",
+}
+
+
+def _model_file(name: str) -> str:
+    """Download a detector model once into ~/.cache/forensight and return its path."""
+    import urllib.request
+
+    url = _MODEL_URLS[name]
+    dest = Path.home() / ".cache" / "forensight" / url.rsplit("/", 1)[-1]
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".part")
+        urllib.request.urlretrieve(url, tmp)
+        tmp.replace(dest)
+    return str(dest)
+
+
 class FaceCropper:
-    """Largest-face detector using MediaPipe (falls back to OpenCV Haar if MediaPipe
-    is unavailable, which is fine for smoke tests but not for real experiments)."""
+    """Largest-face detector. Tries, in order: MediaPipe's legacy ``solutions`` API (older
+    releases), MediaPipe Tasks ``FaceDetector`` (newer releases removed ``solutions``),
+    OpenCV YuNet, then OpenCV Haar. ``backend`` says which one is in use; Haar is only
+    good enough for smoke tests."""
 
-    def __init__(self, scale: float = 1.3, min_confidence: float = 0.5):
+    def __init__(self, scale: float = 1.3, min_confidence: float = 0.5, backends=None):
         self.scale = scale
-        try:
-            import mediapipe as mp
+        self.min_confidence = min_confidence
+        self.backend = None
+        self._det = None
+        errors = []
+        for name in backends or ("mediapipe", "mediapipe-tasks", "yunet", "haar"):
+            try:
+                self._det = getattr(self, "_init_" + name.replace("-", "_"))()
+                self.backend = name
+                break
+            except Exception as e:  # depends on installed library versions
+                errors.append(f"{name}: {type(e).__name__}: {e}")
+        if self.backend is None:
+            raise RuntimeError("No face detector could be loaded:\n  " + "\n  ".join(errors))
+        self.load_errors = errors
 
-            self._mp = mp.solutions.face_detection.FaceDetection(
-                model_selection=1, min_detection_confidence=min_confidence
-            )
-            self._haar = None
-        except Exception:  # pragma: no cover - depends on environment
-            self._mp = None
-            self._haar = cv2.CascadeClassifier(
-                cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            )
+    def _init_mediapipe(self):
+        import mediapipe as mp
+
+        return mp.solutions.face_detection.FaceDetection(
+            model_selection=1, min_detection_confidence=self.min_confidence
+        )
+
+    def _init_mediapipe_tasks(self):
+        from mediapipe.tasks.python import BaseOptions, vision
+
+        opts = vision.FaceDetectorOptions(
+            base_options=BaseOptions(model_asset_path=_model_file("mediapipe")),
+            min_detection_confidence=self.min_confidence,
+        )
+        return vision.FaceDetector.create_from_options(opts)
+
+    def _init_yunet(self):
+        return cv2.FaceDetectorYN.create(_model_file("yunet"), "", (320, 320), self.min_confidence)
+
+    def _init_haar(self):
+        det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        if det.empty():
+            raise RuntimeError("Haar cascade file not found")
+        return det
 
     def detect(self, frame_bgr: np.ndarray):
         h, w = frame_bgr.shape[:2]
         boxes = []
-        if self._mp is not None:
-            res = self._mp.process(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+        if self.backend == "mediapipe":
+            res = self._det.process(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
             for d in res.detections or []:
                 b = d.location_data.relative_bounding_box
                 boxes.append((int(b.xmin * w), int(b.ymin * h), int(b.width * w), int(b.height * h)))
+        elif self.backend == "mediapipe-tasks":
+            import mediapipe as mp
+
+            rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            res = self._det.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
+            for d in res.detections or []:
+                b = d.bounding_box
+                boxes.append((int(b.origin_x), int(b.origin_y), int(b.width), int(b.height)))
+        elif self.backend == "yunet":
+            self._det.setInputSize((w, h))
+            _, faces = self._det.detect(frame_bgr)
+            boxes = [tuple(int(v) for v in f[:4]) for f in (faces if faces is not None else [])]
         else:
             gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-            boxes = [tuple(map(int, b)) for b in self._haar.detectMultiScale(gray, 1.1, 5)]
+            boxes = [tuple(map(int, b)) for b in self._det.detectMultiScale(gray, 1.1, 5)]
+        boxes = [b for b in boxes if b[2] > 0 and b[3] > 0]
         if not boxes:
             return None
         return max(boxes, key=lambda b: b[2] * b[3])
@@ -187,7 +251,11 @@ def main(argv=None):
             continue
         if cropper is None:
             cropper = FaceCropper(scale=d.get("face_scale", 1.3))
-            print("face detector:", "MediaPipe" if cropper._mp is not None else "OpenCV Haar (fallback, less accurate)")
+            print("face detector:", cropper.backend)
+            if cropper.backend == "haar":
+                print("WARNING: Haar is a weak detector; fix MediaPipe/YuNet before the real run:")
+                for err in cropper.load_errors:
+                    print("  ", err)
         items = ffpp.build_index(d["ffpp_root"], d["ffpp_splits"], split, d.get("compression", "c23"))
         print(f"[{split}] cropping faces from {len(items)} videos")
         skipped = preprocess_split(items, local, d["num_frames"], d["image_size"], cropper)
