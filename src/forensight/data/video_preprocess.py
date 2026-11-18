@@ -99,31 +99,70 @@ class FaceCropper:
         return cv2.resize(frame_bgr[y0:y1, x0:x1], (size, size), interpolation=cv2.INTER_AREA)
 
 
-def preprocess_split(items, out_dir: Path, num_frames: int, size: int, cropper: FaceCropper) -> int:
+_FIELDS = ["path", "label", "method", "video_id", "frame"]
+
+
+def _video_dir(item) -> Path:
+    return Path(str(item.label)) / item.method / item.video_id
+
+
+def preprocess_split(items, out_dir: Path, num_frames: int, size: int, cropper: FaceCropper,
+                     log_every: int = 100) -> int:
+    """Write face crops for every video in items. Resumable: a video whose crop folder
+    already has a ``.done`` marker is not processed again, so an interrupted run only
+    does the videos that are left."""
+    import time
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows, skipped = [], 0
-    for item in items:
-        for idx, frame in read_frames(item.path, num_frames):
-            face = cropper.crop(frame, size)
-            if face is None:
-                skipped += 1
-                continue
-            rel = Path(str(item.label)) / item.method / item.video_id / f"{idx:05d}.jpg"
-            dest = out_dir / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(str(dest), face, [cv2.IMWRITE_JPEG_QUALITY, 95])
-            rows.append({"path": str(rel), "label": item.label, "method": item.method,
-                         "video_id": item.video_id, "frame": idx})
+    rows, skipped, start = [], 0, time.time()
+    for n, item in enumerate(items, 1):
+        vdir = out_dir / _video_dir(item)
+        if not (vdir / ".done").exists():
+            vdir.mkdir(parents=True, exist_ok=True)
+            for idx, frame in read_frames(item.path, num_frames):
+                face = cropper.crop(frame, size)
+                if face is None:
+                    skipped += 1
+                    continue
+                cv2.imwrite(str(vdir / f"{idx:05d}.jpg"), face, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            (vdir / ".done").touch()
+        for jpg in sorted(vdir.glob("*.jpg")):
+            rows.append({"path": str(_video_dir(item) / jpg.name), "label": item.label,
+                         "method": item.method, "video_id": item.video_id, "frame": int(jpg.stem)})
+        if n % log_every == 0 or n == len(items):
+            print(f"  {n}/{len(items)} videos ({time.time() - start:.0f}s)", flush=True)
     with open(out_dir / "index.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["path", "label", "method", "video_id", "frame"])
+        writer = csv.DictWriter(f, fieldnames=_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
     return skipped
 
 
-def main(argv=None):
-    from tqdm import tqdm  # noqa: F401  (progress bars in long runs)
+def archive_split(split_dir: Path, archive: Path) -> None:
+    """Pack one finished split into a single .tar in Drive (one big file copies far faster
+    to and from Drive than tens of thousands of small JPEGs). Written via a temporary name
+    so a half-copied archive is never mistaken for a finished one."""
+    import tarfile
 
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    tmp = archive.with_name(archive.name + ".part")
+    with tarfile.open(tmp, "w") as tar:
+        tar.add(split_dir, arcname=split_dir.name)
+    tmp.replace(archive)
+
+
+def restore_split(archive: Path, frames_dir: Path) -> None:
+    import tarfile
+
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive) as tar:
+        try:
+            tar.extractall(frames_dir, filter="data")
+        except TypeError:  # Python versions without extraction filters
+            tar.extractall(frames_dir)
+
+
+def main(argv=None):
     from forensight.config import load_config
     from forensight.data import ffpp
 
@@ -133,12 +172,29 @@ def main(argv=None):
     args = ap.parse_args(argv)
     cfg = load_config(args.config, args.overrides)
     d = cfg["data"]
-    cropper = FaceCropper(scale=d.get("face_scale", 1.3))
+    frames_dir = Path(d["frames_dir"])
+    archive_dir = Path(d["frames_archive_dir"]) if d.get("frames_archive_dir") else None
+    cropper = None
     for split in ("train", "val", "test"):
+        local = frames_dir / split
+        archive = archive_dir / f"{split}.tar" if archive_dir else None
+        if (local / "index.csv").exists():
+            print(f"[{split}] face crops already on local disk")
+            continue
+        if archive and archive.exists():
+            print(f"[{split}] restoring face crops from {archive}")
+            restore_split(archive, frames_dir)
+            continue
+        if cropper is None:
+            cropper = FaceCropper(scale=d.get("face_scale", 1.3))
+            print("face detector:", "MediaPipe" if cropper._mp is not None else "OpenCV Haar (fallback, less accurate)")
         items = ffpp.build_index(d["ffpp_root"], d["ffpp_splits"], split, d.get("compression", "c23"))
-        skipped = preprocess_split(items, Path(d["frames_dir"]) / split, d["num_frames"],
-                                   d["image_size"], cropper)
-        print(f"[{split}] {len(items)} videos processed, {skipped} frames without a face skipped")
+        print(f"[{split}] cropping faces from {len(items)} videos")
+        skipped = preprocess_split(items, local, d["num_frames"], d["image_size"], cropper)
+        print(f"[{split}] done; {skipped} frames without a face skipped")
+        if archive:
+            archive_split(local, archive)
+            print(f"[{split}] saved {archive}")
 
 
 if __name__ == "__main__":

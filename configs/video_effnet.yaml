@@ -8,7 +8,8 @@ data:
   ffpp_splits: /content/drive/MyDrive/forensight/datasets/FaceForensics++/splits
   compression: c23
   frames_dir: /content/forensight_frames/ffpp_c23   # local Colab disk: much faster than Drive
-  num_frames: 32              # frames sampled per video during preprocessing
+  frames_archive_dir: /content/drive/MyDrive/forensight/datasets/ffpp_c23_faces   # one .tar per split, shared via Drive
+  num_frames: 16              # frames sampled per video during preprocessing
   frames_per_video_train: 16  # cap per video so long videos do not dominate
   image_size: 380             # native EfficientNet-B4 resolution
   face_scale: 1.3

@@ -141,3 +141,31 @@ def test_chunked_scoring_resume_and_merge(tmp_path):
     chunked.chunk_path(run, 1).unlink()
     with pytest.raises(FileNotFoundError):
         chunked.merge_chunks(run, len(ranges), keys)
+
+
+def test_preprocess_split_resumes_and_archives(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from forensight.data import video_preprocess as vp
+
+    calls = []
+    frame = np.zeros((40, 40, 3), dtype=np.uint8)
+    monkeypatch.setattr(vp, "read_frames", lambda path, n: calls.append(path) or [(0, frame), (5, frame)])
+    cropper = SimpleNamespace(crop=lambda f, size: np.zeros((size, size, 3), dtype=np.uint8))
+    items = [SimpleNamespace(path=f"v{i}.mp4", label=i % 2, method="m", video_id=f"id{i}") for i in range(3)]
+
+    out = tmp_path / "frames" / "train"
+    vp.preprocess_split(items, out, 2, 16, cropper)
+    assert len(calls) == 3
+    # second run: every video has a .done marker, so nothing is decoded again
+    vp.preprocess_split(items, out, 2, 16, cropper)
+    assert len(calls) == 3
+    rows = (out / "index.csv").read_text().strip().splitlines()
+    assert len(rows) == 1 + 3 * 2
+
+    archive = tmp_path / "drive" / "train.tar"
+    vp.archive_split(out, archive)
+    assert archive.exists() and not archive.with_name("train.tar.part").exists()
+    restored = tmp_path / "restored"
+    vp.restore_split(archive, restored)
+    assert (restored / "train" / "index.csv").read_text() == (out / "index.csv").read_text()
