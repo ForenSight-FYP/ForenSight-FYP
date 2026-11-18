@@ -9,7 +9,7 @@ from forensight.config import apply_overrides
 from forensight.data import asvspoof, ffpp
 from forensight.data.audio_preprocess import NUM_SAMPLES, pad_or_crop, resample, segments
 from forensight.data.splits import group_split
-from forensight.data.video_preprocess import expand_box, read_frames, sample_frame_indices
+from forensight.data.video_preprocess import FaceCropper, expand_box, read_frames, sample_frame_indices
 from forensight.evaluation.aggregate import aggregate
 
 
@@ -169,3 +169,22 @@ def test_preprocess_split_resumes_and_archives(tmp_path, monkeypatch):
     restored = tmp_path / "restored"
     vp.restore_split(archive, restored)
     assert (restored / "train" / "index.csv").read_text() == (out / "index.csv").read_text()
+
+
+def test_face_cropper_falls_back_and_reports_backend():
+    class StubCropper(FaceCropper):
+        def _init_stub(self):  # stands in for a real detector; reports one 50x40 face
+            return None
+
+        def detect(self, frame_bgr):
+            return (10, 20, 50, 40)
+
+    cropper = StubCropper(backends=("nope", "stub"))
+    assert cropper.backend == "stub"
+    assert cropper.load_errors and cropper.load_errors[0].startswith("nope")
+    assert cropper.crop(np.zeros((240, 320, 3), np.uint8), size=64).shape == (64, 64, 3)
+
+
+def test_face_cropper_raises_when_nothing_loads():
+    with pytest.raises(RuntimeError, match="No face detector"):
+        FaceCropper(backends=("nope",))
