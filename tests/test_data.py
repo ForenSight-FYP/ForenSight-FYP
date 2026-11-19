@@ -7,7 +7,7 @@ import pytest
 from forensight import FAKE, REAL
 from forensight.config import apply_overrides
 from forensight.data import asvspoof, ffpp
-from forensight.data.audio_preprocess import NUM_SAMPLES, pad_or_crop, resample, segments
+from forensight.data.audio_preprocess import NUM_SAMPLES, load_audio, pad_or_crop, resample, segments
 from forensight.data.splits import group_split
 from forensight.data.video_preprocess import FaceCropper, expand_box, read_frames, sample_frame_indices
 from forensight.evaluation.aggregate import aggregate
@@ -82,6 +82,22 @@ def test_resample_length():
 
 
 # ---------- video ----------
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_load_audio_falls_back_to_ffmpeg(tmp_path, monkeypatch):
+    sf = pytest.importorskip("soundfile")
+    x = (0.3 * np.sin(np.linspace(0, 200, 16000))).astype(np.float32)
+    p = tmp_path / "a.flac"
+    sf.write(p, x, 16000, subtype="PCM_16")
+    direct = load_audio(p)
+
+    def broken(*a, **k):
+        raise sf.LibsndfileError(39)
+    monkeypatch.setattr(sf, "read", broken)
+    via_ffmpeg = load_audio(p)
+    assert via_ffmpeg.shape == direct.shape
+    assert np.abs(via_ffmpeg - direct).max() < 1e-3
+
+
 def test_sample_frame_indices():
     assert sample_frame_indices(5, 32) == [0, 1, 2, 3, 4]
     idx = sample_frame_indices(300, 4)
