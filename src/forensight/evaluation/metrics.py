@@ -21,6 +21,8 @@ def _check(labels, scores):
     scores = np.asarray(scores, dtype=float).ravel()
     if labels.shape != scores.shape:
         raise ValueError(f"labels {labels.shape} and scores {scores.shape} differ in shape")
+    if not np.isfinite(scores).all():
+        raise ValueError(f"{int((~np.isfinite(scores)).sum())} of {scores.size} scores are NaN/inf")
     if not set(np.unique(labels)) <= {0, 1}:
         raise ValueError("labels must be 0 (real) or 1 (fake)")
     if len(np.unique(labels)) < 2:
