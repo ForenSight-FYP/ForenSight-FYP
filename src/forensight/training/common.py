@@ -32,17 +32,42 @@ def pick_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+class NonFiniteModelError(RuntimeError):
+    """The model's weights or outputs became NaN/inf (usually a mixed-precision overflow)."""
+
+
+def model_is_finite(model: nn.Module) -> bool:
+    """True if every parameter and buffer (incl. BatchNorm running stats) is finite."""
+    return all(torch.isfinite(t).all().item()
+               for t in (*model.parameters(), *model.buffers()) if t.is_floating_point())
+
+
 @torch.no_grad()
 def predict(model: nn.Module, loader: DataLoader, device: torch.device):
-    """Returns (keys, fake probabilities, labels) for every sample in the loader."""
+    """Returns (keys, fake probabilities, labels) for every sample in the loader.
+
+    Runs in fp16 on GPU for speed. A batch that overflows to NaN/inf in fp16 is
+    recomputed in fp32; if it is still not finite, the model itself is broken and
+    NonFiniteModelError is raised instead of passing NaN on to the metrics.
+    """
     model.eval()
     keys, probs, labels = [], [], []
+    n_fallback = 0
     for x, y, k in loader:
+        x = x.to(device, non_blocking=True)
         with torch.autocast(device.type, enabled=device.type == "cuda"):
-            logits = model(x.to(device, non_blocking=True))
-        probs.append(torch.sigmoid(logits.float()).cpu().numpy())
+            logits = model(x).float()
+        if not torch.isfinite(logits).all():
+            n_fallback += 1
+            logits = model(x.float()).float()   # outside autocast: full fp32
+            if not torch.isfinite(logits).all():
+                raise NonFiniteModelError(
+                    "model outputs are NaN/inf even in fp32: the weights or BatchNorm statistics are broken")
+        probs.append(torch.sigmoid(logits).cpu().numpy())
         labels.append(y.numpy())
         keys.extend(k)
+    if n_fallback:
+        print(f"  note: {n_fallback} batch(es) overflowed in fp16 and were recomputed in fp32")
     return keys, np.concatenate(probs), np.concatenate(labels).astype(int)
 
 
@@ -85,24 +110,47 @@ def fit(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader, cfg:
         best, history, start_epoch = ck["best"], ck["history"], ck["epoch"] + 1
         print(f"Resuming from epoch {start_epoch} (best val {monitor} so far: {best})")
 
+    # BatchNorm running stats are updated in the forward pass, so GradScaler (which only
+    # skips the optimizer step) cannot protect them from an fp16 overflow. Keep a copy of
+    # the last good values and put it back after a non-finite batch.
+    buffers = [b for b in model.buffers() if b.is_floating_point()]
+
     for epoch in range(start_epoch, t["epochs"] + 1):
         model.train()
-        start, running = time.time(), 0.0
+        start, running, n_ok, n_skipped = time.time(), 0.0, 0, 0
+        good_buffers = [b.detach().clone() for b in buffers]
         for step, (x, y, _) in enumerate(train_loader, 1):
             x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
             optim.zero_grad(set_to_none=True)
             with torch.autocast(device.type, enabled=device.type == "cuda"):
                 loss = criterion(model(x).float(), y)
+            if not torch.isfinite(loss):
+                n_skipped += 1
+                with torch.no_grad():
+                    for b, g in zip(buffers, good_buffers):
+                        b.copy_(g)
+                sched.step()   # keep the LR schedule aligned with the step count
+                continue
             scaler.scale(loss).backward()
             scaler.step(optim)
             scaler.update()
             sched.step()
+            with torch.no_grad():
+                for b, g in zip(buffers, good_buffers):
+                    g.copy_(b)
             running += loss.item()
+            n_ok += 1
             if step % t.get("log_every", 50) == 0:
-                print(f"epoch {epoch} step {step}/{len(train_loader)} loss {running / step:.4f}")
+                print(f"epoch {epoch} step {step}/{len(train_loader)} loss {running / max(n_ok, 1):.4f}")
+        if n_skipped:
+            print(f"  note: skipped {n_skipped} batch(es) with a NaN/inf loss this epoch")
 
+        if not model_is_finite(model):
+            raise NonFiniteModelError(
+                f"model weights became NaN/inf during epoch {epoch}; nothing was saved for this epoch. "
+                f"checkpoint.pt still holds epoch {epoch - 1}: run the cell again to resume from there.")
         val = evaluate(model, val_loader, device, group_val_by_key)
-        entry = {"epoch": epoch, "train_loss": running / len(train_loader),
+        entry = {"epoch": epoch, "train_loss": running / max(n_ok, 1), "skipped_batches": n_skipped,
                  "seconds": round(time.time() - start, 1), **{f"val_{k}": v for k, v in val.items()}}
         history.append(entry)
         print(json.dumps({k: round(v, 4) if isinstance(v, float) else v for k, v in entry.items()}))
