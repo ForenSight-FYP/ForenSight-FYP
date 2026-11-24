@@ -3,9 +3,13 @@ a randomly initialised small backbone stands in for the trained EfficientNet-B4.
 
 import numpy as np
 import pytest
-import torch
 
-from forensight.inference import AUDIO_THRESHOLD, VIDEO_THRESHOLD, Analyser, AnalysisResult, prepare_face
+# CI installs only the light dependencies (no PyTorch): skip these tests there, like
+# test_models.py does. They run in Colab, where the full [dl] extras are installed.
+torch = pytest.importorskip("torch")
+pytest.importorskip("timm")
+
+from forensight.inference import AUDIO_THRESHOLD, VIDEO_THRESHOLD, Analyser, AnalysisResult, prepare_face  # noqa: E402
 
 
 def test_prepare_face_matches_training_preprocessing():
